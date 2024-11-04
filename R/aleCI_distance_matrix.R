@@ -31,3 +31,4 @@ aleCI_distance_matrix <- function(X, J, K, d, x.count) {
 
     return(D.cum)
 }
+

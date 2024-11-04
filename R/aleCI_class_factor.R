@@ -39,3 +39,4 @@ aleCI_class_factor <- function(X, X.model, pred.fun, J, K, d, N) {
 #    barplot(fJ, names=x, xlab=paste("x_", J, " (", names(X)[J], ")", sep=""), ylab= paste("f_",J,"(x_",J,")", sep=""), las =3)
     return(list(x = x, fJ = fJ))
 }
+
