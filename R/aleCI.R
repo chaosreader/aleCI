@@ -31,12 +31,10 @@ aleCI <- function(X, X.models, pred.fun, mid.ci.fun, low.ci.fun, high.ci.fun, J,
         
     if (valid_list_length_2)
     {
-        print("hit2")
         ab <- aleCI_with_train(X, X.models, pred.fun, mid.ci.fun, low.ci.fun, high.ci.fun, J, K, NA.plot)
     }
     else
     {
-        print("hit1")
         ab <- aleCI_with_train(X, X.models, pred.fun, mid.ci.fun, low.ci.fun, high.ci.fun, J, K, NA.plot)
     }
     return(ab)

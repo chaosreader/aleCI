@@ -7,7 +7,6 @@ aleCI_get_mean_and_variance <- function(alist, mid.ci.fun, low.ci.fun, high.ci.f
     idx <- 1
     for (i in alist[[1]]$x.values) {
         b <- sapply(alist, function(x) x$f.values[x$x.values == i])
-        print(b)
         aa_mean[idx] <- mid.ci.fun(b)
         aa_low[idx] <- low.ci.fun(b)
         aa_high[idx] <- high.ci.fun(b)
