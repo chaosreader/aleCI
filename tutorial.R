@@ -1,0 +1,271 @@
+library("devtools")
+install_github("chaosreader/aleCI")
+library(AleCI)
+
+# https://github.com/datasciencedojo/datasets/blob/master/titanic.csv
+
+#download and clean the Titanic dataset
+
+df <- read.csv("https://raw.githubusercontent.com/datasciencedojo/datasets/refs/heads/master/titanic.csv")
+df <- df[ , c(colnames(df)[2],colnames(df)[1],colnames(df)[3:length(colnames(df))])]
+df[is.na(df)] <- 0
+df[df==""] <- "ZZ"
+df$Cabin <- sapply(df$Cabin, function(x) substring(x, 1, 1))
+
+df$Sex <- as.factor(df$Sex)
+df$PassengerId <- as.factor(df$PassengerId)
+df$Pclass <- as.factor(df$Pclass)
+df$Name <- as.factor(df$Name)
+df$SibSp <- as.factor(df$SibSp)
+df$Parch <- as.factor(df$Parch)
+df$Ticket <- as.factor(df$Ticket)
+df$Cabin <- as.factor(df$Cabin)
+df$Embarked <- as.factor(df$Embarked)
+
+set.seed(1234)
+# break Titanic data into train and test
+sample <- sample(c(TRUE, FALSE), nrow(df), replace=TRUE, prob=c(0.7,0.3))
+df_train  <- df[sample, ]
+df_test   <- df[!sample, ]
+
+# create a biased training set
+df_gender_bias <- df_train
+df_gender_bias$Survived[df_gender_bias$Sex == 'male'] <- 0
+
+# create a biased model
+library("ranger")
+
+df_models <- list()
+
+rf <- ranger(
+  formula        = Survived ~ .,
+  data           = df_gender_bias)
+df_models[[1]] <- rf
+
+
+# graph biased model using ALEPlot
+library("ALEPlot")
+yhat <- function(X.model, newdata) as.numeric(predict(X.model, newdata)$predictions)
+ALEPlot(df_test[,2:12], df_models[[1]], yhat, J="Sex", K=10)
+
+
+# create unbiased models to create confidence interval with
+nmodels = 49
+df_models = list(type="ranger")
+df_long = df_train[sample(nrow(df_train), (600*nmodels), replace=TRUE), ]
+rownames(df) <- NULL
+
+n = 0
+for(i in seq(from=1, to=nrow(df_long)-1, by=(nrow(df_long)/nmodels))){
+  n = n + 1
+  rf <- ranger(
+    formula        = Survived ~ .,
+    data           = df_long[i:(i+(nrow(df_long)/nmodels-1)),])
+  df_models[[n]] <- rf
+}
+
+# create biased model for AleCI to graph
+rf <- ranger(
+  formula        = Survived ~ .,
+  data           = df_gender_bias)
+df_models[[n+1]] <- rf
+df_models <- rev(df_models)
+
+#add the training data to build confidence intervals
+df_data <- list()
+df_data[[1]] <- df_test
+df_data[[2]] <- df_train
+
+#plot with AleCI
+library("AleCI")
+yhat.mid <- function(newdata) mean(newdata)
+yhat.low <- function(newdata) quantile(newdata, .025)[[1]]
+yhat.high <- function(newdata) quantile(newdata, .975)[[1]]
+
+aleCI_plot(df_data, df_models, yhat, yhat.mid, yhat.low, yhat.high, J = "Sex", K=10, NA.plot = TRUE)
+
+#replace biased model with unbiased model
+rf <- ranger(
+  formula        = Survived ~ .,
+  data           = df_train)
+df_models[[1]] <- rf
+
+
+#plot with AleCI
+aleCI_plot(df_data, df_models, yhat, yhat.mid, yhat.low, yhat.high, J = "Sex", K=10, NA.plot = TRUE)
+
+# https://mfasiolo.github.io/mgcViz/articles/miscellanea.html
+library(mgcViz)
+data(UKload)
+
+#fit the UK load example
+fit <- qgam(NetDemand ~ Dow + s(Posan, k = 20) + s(wM) + s(wM_s95), data = UKload, qu = 0.5)
+
+#plot the ALE with mgcViz
+plot(ALE(fit, x = "wM_s95"))
+
+#update the prediction function for the new model
+yhat <- function(X.model, newdata) as.numeric(predict(X.model, newdata))
+
+#plot the ALE with ALEPlot
+ALEPlot(UKload, fit, yhat, J="wM_s95")
+
+#train models for AleCI
+df <- as.data.frame(UKload)
+df_models = list(type=class(fit))
+set.seed(1234)
+df_long = df[sample(nrow(df), (2000*nmodels), replace=TRUE), ]
+n = 0
+for(i in seq(from=1, to=nrow(df_long)-1, by=(nrow(df_long)/nmodels))){
+  #  stuff, such as
+  n = n + 1
+  rf <- qgam(
+    NetDemand ~ Dow + s(Posan, k = 20) + s(wM) + s(wM_s95),
+    data = df_long[i:(i+(nrow(df_long)/nmodels-1)),],
+    qu = 0.5)
+  df_models[[n]] <- rf
+}
+
+df_models[[n+1]] <- fit
+df_models <- rev(df_models)
+
+#plot the ALE with AleCI
+aleCI_plot(df,df_models, yhat, yhat.mid, yhat.low, yhat.high, J = "wM_s95", K=40, NA.plot = TRUE)
+
+
+#The Boston housing data
+data("BostonHousing", package = "mlbench")
+BH <- BostonHousing
+BH$rad <- as.factor(BH$rad)
+BH <- BH[,c(colnames(BH)[length(colnames(BH))],colnames(BH)[2:length(colnames(BH))-1])]
+#train test split
+set.seed(1234)
+sample <- sample(c(TRUE, FALSE), nrow(BH), replace=TRUE, prob=c(0.7,0.3))
+BH_train  <- BH[sample, ]
+BH_test   <- BH[!sample, ]
+
+#train the model
+rf <- ranger(
+  formula        = medv ~ .,
+  data           = BH_train)
+
+#set the prediction function for the new model
+# yhat is the syntax for the origional ALEPlot, yhat_ale is not compatible with both
+# ale and ALEPLot
+yhat <- function(X.model, newdata) as.numeric(predict(X.model, newdata)$predictions)
+
+yhat_ale <- function(object, newdata, type = pred_type) {
+  as.numeric(predict(object, newdata)$predictions)
+}
+
+#Plot ALE with ALEPLot
+ALEPlot(BH_test, rf , yhat, J="age", K=40)
+
+#Plot ALE with ale with option to match ALEPlot values
+library("ale")
+ale_BH <- ale(data = BH_test, model = rf, pred_fun = yhat_ale, x_intervals = 40, relative_y = "zero" )
+ale_BH$plots$age
+
+#Bootstrap the data and train the models for AleCI
+df_models = list(type="ranger")
+df_long = BH_train[sample(nrow(BH_train), (600*nmodels), replace=TRUE), ]
+rownames(df) <- NULL
+
+n = 0
+for(i in seq(from=1, to=nrow(df_long)-1, by=(nrow(df_long)/nmodels))){
+  #  stuff, such as
+  n = n + 1
+  rf2 <- ranger(
+    formula        = medv ~ .,
+    data           = df_long[i:(i+(nrow(df_long)/nmodels-1)),])
+  df_models[[n]] <- rf2
+}
+
+df_models[[n+1]] <- rf
+df_models <- rev(df_models)
+
+#include the training data for construction of the confidence intervals
+df_data <- list()
+df_data[[1]] <- BH_test
+df_data[[2]] <- BH_train
+
+#plot the ALE with AleCI
+aleCI_plot(df_data,df_models, yhat_ale, yhat.mid, yhat.low, yhat.high, J = "age", K=40, NA.plot = TRUE)
+
+library("dplyr")
+#load the diamonds data
+diamonds <- ggplot2::diamonds |>
+  filter(!(x == 0 | y == 0 | z == 0)) |>
+  # https://lorentzen.ch/index.php/2021/04/16/a-curious-fact-on-the-diamonds-dataset/
+  distinct(
+    price, carat, cut, color, clarity,
+    .keep_all = TRUE
+  ) |>
+  rename(
+    x_length = x,
+    y_width = y,
+    z_depth = z,
+    depth_pct = depth
+  )
+
+#create gam model
+gam_diamonds <- mgcv::gam(
+  price ~ s(carat) + s(depth_pct) + s(table) + s(x_length) + s(y_width) + s(z_depth) +
+    cut + color + clarity,
+  data = diamonds
+)
+
+# Bootstraping is rather slow, so create a smaller subset of new data for demonstration
+set.seed(1234)
+new_rows <- sample(nrow(diamonds), 200, replace = FALSE)
+diamonds_small_test <- diamonds[new_rows, ]
+
+#remove outlier
+diamonds2 <- diamonds_small_test[c(1:182,184:200), ]
+max(diamonds2$carat)
+
+#calulate ALE and CI with ale package
+ale_gam_diamonds_boot <- ale(
+  diamonds2, gam_diamonds,
+  # Normally boot_it should be set to 100, but just 10 here for a faster demonstration
+  boot_it = 10,
+  parallel = 2  # CRAN limit (delete this line on your own computer)
+)
+
+# plot diamonds example with ale
+ale_gam_diamonds_boot$plots$carat
+
+
+# set the predition function to match the model
+yhat <- function(X.model, newdata) as.numeric(predict(X.model, newdata))
+
+df <- as.data.frame(diamonds2)
+df$cut <- factor(df$cut, ordered=FALSE)
+df$color <- factor(df$color, ordered=FALSE)
+df$clarity <- factor(df$clarity, ordered=FALSE)
+
+#plot the ALE with ALEPlot
+ALEPlot(df[,c(1:6, 8:10)], gam_diamonds, yhat, J="carat", K=40)
+
+#plot the ALE with mgcViz
+plot(ALE(gam_diamonds, x = "carat", newdata=df[,c(1:6, 8:10)]))
+
+#train models for AleCI
+df_models = list(type=class(gam_diamonds))
+df_long = diamonds[sample(nrow(diamonds), (30000*nmodels), replace=TRUE), ]
+
+n = 0
+for(i in seq(from=1, to=nrow(df_long)-1, by=(nrow(df_long)/nmodels))){
+  n = n + 1
+  rf <- mgcv::gam(
+    price ~ s(carat) + s(depth_pct) + s(table) + s(x_length) + s(y_width) + s(z_depth) + cut + color + clarity,
+    data = df_long[i:(i+(nrow(df_long)/nmodels-1)),])
+  df_models[[n]] <- rf
+}
+
+df_models[[n+1]] <- gam_diamonds
+df_models <- rev(df_models)
+
+#plot ALE with AleCI
+aleCI_plot(df[,c(1:6, 8:10)],df_models, yhat, yhat.mid, yhat.low, yhat.high, J = "carat", K=40, NA.plot = TRUE)
+
