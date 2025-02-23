@@ -1,0 +1,7 @@
+ randomForest(formula = medv ~ ., data = b_train) 
+               Type of random forest: regression
+                     Number of trees: 500
+No. of variables tried at each split: 4
+
+          Mean of squared residuals: 9.397424
+                    % Var explained: 88.31
