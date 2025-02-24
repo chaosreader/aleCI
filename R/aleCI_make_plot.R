@@ -14,6 +14,6 @@ aleCI_make_plot <- function(ad, X, J) {
       ggplot2::geom_line(ggplot2::aes(x=ac$x.values, y=ac$f.values), color="black", linewidth=2) +
       ggplot2::geom_line(ggplot2::aes(x=ab$x.values, y=ab$low), color="dark green") +
       ggplot2::geom_line(ggplot2::aes(x=ab$x.values, y=ab$high), color="dark green") +
-      ggplot2::geom_rug(data=X, ggplot2::aes(x = J))
+      ggplot2::geom_rug(data=X[[1]], ggplot2::aes(x = eval(parse(text=J))))
   }
 }
