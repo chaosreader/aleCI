@@ -1,4 +1,4 @@
-aleCI_make_plot <- function(ad) {
+aleCI_make_plot <- function(ad, X, J) {
     ab <- ad[[2]]
     ac <- ad[[1]]
   if (class(ab$x.values) == "character") {
@@ -13,6 +13,7 @@ aleCI_make_plot <- function(ad) {
       ggplot2::geom_ribbon(ggplot2::aes(x=ab$x.values, ymin=ab$low, ymax=ab$high), fill = "forest green", alpha = .5) +
       ggplot2::geom_line(ggplot2::aes(x=ac$x.values, y=ac$f.values), color="black", linewidth=2) +
       ggplot2::geom_line(ggplot2::aes(x=ab$x.values, y=ab$low), color="dark green") +
-      ggplot2::geom_line(ggplot2::aes(x=ab$x.values, y=ab$high), color="dark green")
+      ggplot2::geom_line(ggplot2::aes(x=ab$x.values, y=ab$high), color="dark green") +
+      ggplot2::geom_rug(data=X, aes(x = J))
   }
 }
