@@ -1,4 +1,4 @@
-my_bag_train <- function(train.func, var.data, nmodels=20, my.env=environment()){
+bag_train <- function(train.func, var.data, nmodels=20, my.env=environment()){
     model <- eval(parse(text=train.func))
     df_models = list(type=class(model))
     df_models[[1]] <- model
