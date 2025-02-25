@@ -47,7 +47,9 @@ df_models <- bag_train("rf <- ranger(
 
 library("ALEPlot")
 yhat <- function(X.model, newdata) as.numeric(predict(X.model, newdata)$predictions)
-ALEPlot(df_test[,2:12], df_models[[1]], yhat, J="Sex", K=10)
+#ALEPlot(df_test[,2:12], df_models[[1]], yhat, J="Sex", K=10)
+source("./titanicALEPlot.R")
+titanicALEPlot(df_test[,2:12], df_models[[1]], yhat, J="Sex", K=10)
 
 biased_model <- df_models[[1]]
 
