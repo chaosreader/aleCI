@@ -58,7 +58,7 @@ df_models <- bag_train("ranger(
     formula = Survived ~ .,
     data = df_train)",
           "df_train",
-          50)
+          200)
 
 df_models[[1]] <- biased_model
 
@@ -126,7 +126,7 @@ source("./ukloadALEPlot.R")
 ukloadALEPlot(UKload, fit, yhat, J="wM_s95")
 
 set.seed(1234)
-df_models <- bag_train("qgam(NetDemand ~ Dow + s(Posan, k = 20) + s(wM) + s(wM_s95), data = UKload, qu = 0.5)","UKload", 50)
+df_models <- bag_train("qgam(NetDemand ~ Dow + s(Posan, k = 20) + s(wM) + s(wM_s95), data = UKload, qu = 0.5)","UKload", 200)
 
 df <- as.data.frame(UKload)
 
@@ -183,7 +183,7 @@ df_models <- bag_train("ranger(
   formula        = medv ~ .,
   data           = BH_train)",
                        "BH_train",
-                       50)
+                       200)
 
 #include the training data for construction of the confidence intervals
 df_data <- list()
@@ -272,7 +272,7 @@ set.seed(1234)
 df_models <- bag_train("mgcv::gam(
   price ~ s(carat) + s(depth_pct) + s(table) + s(x_length) + s(y_width) + s(z_depth) +
     cut + color + clarity,
-  data = diamonds)","diamonds",50)
+  data = diamonds)","diamonds",200)
 
 aleCI_plot(df[,c(1:6, 8:10)],df_models, yhat, yhat.mid, yhat.low, yhat.high,
            J = "carat", K=40, NA.plot = TRUE)+
