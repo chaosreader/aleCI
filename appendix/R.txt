@@ -1,0 +1,266 @@
+bag_train <- function(train.func, var.data, nmodels=20, my.env=environment()){
+	model <- eval(parse(text=train.func))
+	df_models = list(type=class(model))
+	df_models[[1]] <- model
+	if (nmodels > 1) {
+		df_long = eval(parse(text=var.data))[sample(nrow(eval(parse(text=var.data))), (nrow(eval(parse(text=var.data)))*(nmodels-1)), replace=TRUE), ]
+		rownames(df_long) <- NULL
+		n = 1
+	        for(i in seq(from=1, to=nrow(df_long)-1, by=(nrow(df_long)/(nmodels-1)))){
+		        n = n + 1
+		        bag.data <- df_long[i:(i+(nrow(df_long)/nmodels-1)),]
+		        bag.func <- sub(var.data, "bag.data", train.func)
+		        model <- eval(parse(text=bag.func))
+		        df_models[[n]] <- model
+		        }
+		}
+	return(df_models)
+	}
+aleCI_class_factor <- function(X, X.model, pred.fun, J, K, d, N) {
+#for categorical X[,J], calculate the ALE plot
+  #Get rid of any empty levels of x and tabulate level counts and probabilities
+    arr <- aleCI_make_buckets(X, J, K, d, N)
+    X <- arr$X
+    x.prob <- arr$x.prob
+    x.count <- arr$x.count
+    K <- arr$K
+    
+    D.cum <- aleCI_distance_matrix(X, J, K, d, x.count)
+    
+    #calculate the 1-D MDS representation of D and the ordered levels of X[,J]
+    D1D <- cmdscale(D.cum, k = 1) #1-dimensional MDS representation of the distance matrix
+    ind.ord <- sort(D1D, index.return = T)$ix    #K-length index vector. The i-th element is the original level index of the i-th lowest ordered level of X[,J].
+    ord.ind <- sort(ind.ord, index.return = T)$ix    #Another K-length index vector. The i-th element is the order of the i-th original level of X[,J].
+    levs.orig <- levels(X[,J])  #as.character levels of X[,J] in original order
+    levs.ord <- levs.orig[ind.ord]  #as.character levels of X[,J] after ordering
+    x.ord <- ord.ind[as.numeric(X[,J])]  #N-length vector of numerical version of X[,J] with numbers corresponding to the indices of the ordered levels
+
+    #Calculate the model predictions with the levels of X[,J] increased and decreased by one
+    row.ind.plus <- (1:N)[x.ord < K]  #indices of rows for which X[,J] was not the highest level
+    row.ind.neg <- (1:N)[x.ord > 1]  #indices of rows for which X[,J] was not the lowest level
+    X.plus <- X
+    X.neg <- X
+    X.plus[row.ind.plus,J] <- levs.ord[x.ord[row.ind.plus]+1]  #Note that this leaves the J-th column as a factor with the same levels as X[,J], whereas X.plus[,J] <- . . . would convert it to a character vector
+    X.neg[row.ind.neg,J] <- levs.ord[x.ord[row.ind.neg]-1]
+    y.hat <- pred.fun(X.model=X.model, newdata = X)
+    y.hat.plus <- pred.fun(X.model=X.model, newdata = X.plus[row.ind.plus,])
+    y.hat.neg <- pred.fun(X.model=X.model, newdata = X.neg[row.ind.neg,])
+
+    #Take the appropriate differencing and averaging for the ALE plot
+    Delta.plus <- y.hat.plus-y.hat[row.ind.plus]  #N.plus-length vector of individual local effect values. They are the differences between the predictions with the level of X[,J] increased by one level (in ordered levels) and the predictions with the actual level of X[,J].
+    Delta.neg <- y.hat[row.ind.neg]-y.hat.neg  #N.neg-length vector of individual local effect values. They are the differences between the predictions with the actual level of X[,J] and the predictions with the level of X[,J] decreased (in ordered levels) by one level. 
+    Delta <- as.numeric(tapply(c(Delta.plus, Delta.neg), c(x.ord[row.ind.plus], x.ord[row.ind.neg]-1), mean)) #(K-1)-length vector of averaged local effect values corresponding to the first K-1 ordered levels of X[,J]. 
+    fJ <- c(0, cumsum(Delta)) #K length vector of accumulated averaged local effects
+    #now vertically translate fJ, by subtracting its average (averaged across X[,J])
+    fJ = fJ - sum(fJ*x.prob[ind.ord])
+    x <- levs.ord
+#    barplot(fJ, names=x, xlab=paste("x_", J, " (", names(X)[J], ")", sep=""), ylab= paste("f_",J,"(x_",J,")", sep=""), las =3)
+    return(list(x = x, fJ = fJ))
+}
+
+aleCI_class_numeric <- function(X, X.model, pred.fun, J, K) {
+    arr <- aleCI_make_buckets(X, J, K, d, N)
+    z <- arr$z
+    K <- arr$K
+    fJ <- arr$fJ
+    a1 <- arr$a1
+    X1 = X
+    X2 = X
+    X1[,J] = z[a1]
+    X2[,J] = z[a1+1]
+    y.hat1 = pred.fun(X.model=X.model, newdata = X1)
+    y.hat2 = pred.fun(X.model=X.model, newdata = X2)
+    Delta=y.hat2-y.hat1  #N-length vector of individual local effect values
+    Delta = as.numeric(tapply(Delta, a1, mean)) #K-length vector of averaged local effect values
+    fJ = c(0, cumsum(Delta)) #K+1 length vector
+    #now vertically translate fJ, by subtracting its average (averaged across X[,J])
+    b1 <- as.numeric(table(a1)) #frequency count of X[,J] values falling into z intervals
+    fJ = fJ - sum((fJ[1:K]+fJ[2:(K+1)])/2*b1)/sum(b1)
+    x <- z
+#    plot(x, fJ, type="l", xlab=paste("x_",J, " (", names(X)[J], ")", sep=""), ylab= paste("f_",J,"(x_",J,")", sep=""))
+    return(list(x = x, fJ = fJ))
+}
+aleCI_distance_matrix <- function(X, J, K, d, x.count) {
+    
+    D.cum <- matrix(0, K, K)  #will be the distance matrix between pairs of levels of X[,J]
+    D <- matrix(0, K, K)  #initialize matrix
+
+    #For loop for calculating distance matrix D for each of the other predictors
+    for (j in setdiff(1:d, J)) { 
+      if (class(X[,j]) == "factor") {#Calculate the distance matrix for each categorical predictor
+        A=table(X[,J],X[,j])  #frequency table, rows of which will be compared
+        A=A/x.count
+        for (i in 1:(K-1)) {
+          for (k in (i+1):K) {
+            D[i,k] = sum(abs(A[i,]-A[k,]))/2  #This dissimilarity measure is always within [0,1]
+            D[k,i] = D[i,k]
+          }
+        }
+        D.cum <- D.cum + D
+      }  #End of if (class(X[,j] == "factor") statement
+      else  { #calculate the distance matrix for each numerical predictor
+        q.x.all <- quantile(X[,j], probs = seq(0, 1, length.out = 100), na.rm = TRUE, names = FALSE)  #quantiles of X[,j] for all levels of X[,J] combined
+        x.ecdf=tapply(X[,j], X[,J], ecdf) #list of ecdf's for X[,j] by levels of X[,J]
+        for (i in 1:(K-1)) {
+          for (k in (i+1):K) {
+            D[i,k] = max(abs(x.ecdf[[i]](q.x.all)-x.ecdf[[k]](q.x.all)))  #This dissimilarity measure is the Kolmogorov-Smirnov distance between X[,j] for levels i and k of X[,J]. It is always within [0,1]
+            D[k,i] = D[i,k]
+          }
+        }
+        D.cum <- D.cum + D
+      }  #End of else statement that goes with if (class(X[,j] == "factor") statement
+    } #end of for (j in setdiff(1:d, J) loop
+
+    return(D.cum)
+}
+
+aleCI_get_mean_and_variance <- function(alist, mid.ci.fun, low.ci.fun, high.ci.fun) 
+    {
+    ab <- as.data.frame(alist[[1]])
+    aa_mean <- vector()
+    aa_low <- vector()
+    aa_high <- vector()
+    idx <- 1
+    for (i in alist[[1]]$x.values) {
+        b <- sapply(alist, function(x) x$f.values[x$x.values == i])
+        aa_mean[idx] <- mid.ci.fun(b)
+        aa_low[idx] <- low.ci.fun(b)
+        aa_high[idx] <- high.ci.fun(b)
+        idx <- 1 + idx
+        }
+    ab$mean <- aa_mean
+    ab$low <- aa_low
+    ab$high <- aa_high
+    return(ab)
+    }
+aleCI_make_buckets <- function(X, J, K, d, N) {
+    if  (class(X[,J]) == "factor") {
+        X[,J] <- droplevels(X[,J])
+        x.count <- as.numeric(table(X[,J])) #frequency count vector for levels of X[,J]
+        x.prob <- x.count/sum(x.count) #probability vector for levels of X[,J]
+        K <- nlevels(X[,J])  #reset K to the number of levels of X[,J]
+        return(list(X = X, x.prob = x.prob, x.count = x.count, K = K))
+        }
+    else {
+        #find the vector of z values corresponding to the quantiles of X[,J]
+        z= c(min(X[,J]), as.numeric(quantile(X[,J],seq(1/K,1,length.out=K), type=1)))  #vector of K+1 z values
+        z = unique(z)  #necessary if X[,J] is discrete, in which case z could have repeated values 
+        K = length(z)-1 #reset K to the number of unique quantile points
+        fJ = numeric(K)
+        #group training rows into bins based on z
+        a1=as.numeric(cut(X[,J], breaks=z, include.lowest=TRUE)) #N-length index vector indicating into which z-bin the training rows fall
+        return(list(z = z, K = K, fJ = fJ, a1 = a1))
+        }
+    }
+aleCI_make_plot <- function(ad, X, J) {
+    ab <- ad[[2]]
+    ac <- ad[[1]]
+  if (class(ab$x.values) == "character") {
+    ggplot2::ggplot() +
+      ggplot2::geom_bar(ggplot2::aes(x=as.factor(ac$x.values),y=ac$f.values), stat='identity',color='black', fill='gray') +
+      ggplot2::geom_errorbar(ggplot2::aes(x=as.factor(ac$x.values), ymin=ac$f.values, ymax=ac$f.values), color="black", alpha=0.8, linewidth=2, width=.9, lty = 1) +
+      ggplot2::geom_errorbar(ggplot2::aes(x=as.factor(ab$x.values), ymin=ab$low, ymax=ab$high), color="dark green", alpha=1, linewidth=1, width=.75) +
+      ggplot2::geom_errorbar(ggplot2::aes(x=as.factor(ab$x.values), ymin=ab$mean, ymax=ab$mean), color="dark green", alpha=.5, linewidth=1, width=.5, lty = 2)
+  }
+  else {
+    ggplot2::ggplot() +
+      ggplot2::geom_ribbon(ggplot2::aes(x=ab$x.values, ymin=ab$low, ymax=ab$high), fill = "forest green", alpha = .5) +
+      ggplot2::geom_line(ggplot2::aes(x=ac$x.values, y=ac$f.values), color="black", linewidth=2) +
+      ggplot2::geom_line(ggplot2::aes(x=ab$x.values, y=ab$low), color="dark green") +
+      ggplot2::geom_line(ggplot2::aes(x=ab$x.values, y=ab$high), color="dark green") +
+      ggplot2::geom_rug(data=X[[1]], ggplot2::aes(x = eval(parse(text=J))))
+  }
+}
+#' @export
+aleCI_origional  <- function(X, X.model, pred.fun, J, K = 40, NA.plot = TRUE) {
+
+N = dim(X)[1]  #sample size
+d = dim(X)[2]  #number of predictor variables
+
+if (length(J) == 1) { #calculate main effects ALE plot
+  
+  if (class(X[,J]) == "factor") {
+      
+      arr <- aleCI_class_factor(X, X.model, pred.fun, J, K, d, N)
+      x <- arr$x
+      fJ <- arr$fJ
+  } #end of if (class(X[,J]) == "factor") statement
+
+  else
+      
+      arr <- aleCI_class_numeric(X, X.model, pred.fun, J, K)
+      x <- arr$x
+      fJ <- arr$fJ
+  }  #end of else if (class(X[,J]) == "numeric" | class(X[,J]) == "integer") statement
+
+
+else print("error:  J must be a vector of length")
+
+list(K=K, x.values=x, f.values = fJ)
+}
+
+aleCI_plot <- function(X, X.models, pred.fun, mid.ci.fun, low.ci.fun, high.ci.fun, J, K=40, NA.plot = TRUE)
+    {
+    ab <- aleCI(X, X.models, pred.fun, mid.ci.fun, low.ci.fun, high.ci.fun, J, K, NA.plot)
+    if (class(X) == "data.frame")
+    {
+        XX <- list()
+        XX[[1]] <- X
+        X <- XX
+    }
+    aleCI_make_plot(ab, X, J)
+    }
+aleCI <- function(X, X.models, pred.fun, mid.ci.fun, low.ci.fun, high.ci.fun, J, K=40, NA.plot = TRUE) {
+    valid_list_length_2 <- FALSE
+    valid_list_length_1 <- FALSE
+    
+    if ((class(X) == "list") & (class(X[[1]]) == "data.frame") & (class(X[[2]]) == "data.frame"))
+    {
+        valid_list_length_2 <- TRUE
+    }
+    else if ((class(X) == "list") & (class(X[[1]]) == "data.frame"))
+    {
+        valid_list_length_1 <- TRUE
+    }
+    else if (class(X) == "data.frame")
+    {
+        XX <- list()
+        XX[[1]] <- X
+        X <- XX
+        valid_list_length_1 <- TRUE
+    }
+    else 
+    {
+        print("data must be either dataframe or list of dataframes")
+    }
+    
+    if (class(X.models) != "list") 
+    {
+        XX.models <- list()
+        XX.models[[1]] <- X.models
+        X.models <- X.models
+    }
+        
+    if (valid_list_length_2)
+    {
+        ab <- aleCI_with_train(X, X.models, pred.fun, mid.ci.fun, low.ci.fun, high.ci.fun, J, K, NA.plot)
+    }
+    else
+    {
+        ab <- aleCI_with_train(X, X.models, pred.fun, mid.ci.fun, low.ci.fun, high.ci.fun, J, K, NA.plot)
+    }
+    return(ab)
+    }
+aleCI_with_train <- function(X, X.models, pred.fun, mid.ci.fun, low.ci.fun, high.ci.fun, J, K, NA.plot)
+    {
+    aa <- list()
+    for (i in 1:length(X.models)) {
+        aa[[i]] <- aleCI_origional(X[[length(X)]], X.models[[i]], yhat, J, K, NA.plot)
+        }
+    ab <- aleCI_get_mean_and_variance(aa, mid.ci.fun, low.ci.fun, high.ci.fun)
+    ac <- aleCI_origional(X[[1]], X.models[[1]], yhat, J, K, NA.plot)
+    ad <- list()
+    ad[[1]] <- as.data.frame(ac)
+    ad[[2]] <- ab
+    return(ad)
+    }
